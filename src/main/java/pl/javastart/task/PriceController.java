@@ -3,13 +3,14 @@ package pl.javastart.task;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
 public class PriceController {
     private static final int ROUNDING_SCALE = 10;
-    private static final int ROUNDING_MODE = 0;
 
     public static List<Product> readProducts(String fileName) {
         List<Product> products = new ArrayList<>();
@@ -21,8 +22,7 @@ public class PriceController {
             }
             return products;
         } catch (IOException ex) {
-            System.err.println("Wystąpił problem podczas czytania pliku");
-            return List.of();
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -44,8 +44,7 @@ public class PriceController {
             }
             return currencies;
         } catch (IOException ex) {
-            System.err.println("Wystąpił problem podczas czytania pliku");
-            return List.of();
+            throw new UncheckedIOException(ex);
         }
     }
 
@@ -60,8 +59,7 @@ public class PriceController {
         BigDecimal sum = BigDecimal.ZERO;
         for (Product product : products) {
             BigDecimal rate = findRate(product.getCurrency(), currencies);
-            BigDecimal euroPrice = product.getPrice()
-                    .divide(rate, ROUNDING_SCALE, ROUNDING_MODE);
+            BigDecimal euroPrice = calculatePriceInEuro(product.getPrice(), rate);
             sum = sum.add(euroPrice);
         }
         return sum;
@@ -69,33 +67,37 @@ public class PriceController {
 
     public static BigDecimal getAveragePriceInEuro(List<Product> products, List<Currency> currencies) {
         BigDecimal sum = getSumInEuro(products, currencies);
-        return sum.divide(new BigDecimal(products.size()), ROUNDING_SCALE, ROUNDING_MODE);
+        return sum.divide(new BigDecimal(products.size()), ROUNDING_SCALE, RoundingMode.UP);
     }
 
-    public static Product getMostValuableProduct(List<Product> products) {
-        if (products.size() == 0) {
-            throw new EmptyFileException("Brak produktów");
-        }
-        Product mostValuable = products.get(0);
-        for (Product product : products) {
-            if (product.getPrice().compareTo(mostValuable.getPrice()) > 0) {
-                mostValuable = product;
+    public static Product getMostValuableProduct(List<Product> products, List<Currency> currencies) {
+        Product mostValuableProduct = products.get(0);
+        BigDecimal mostValuableProductEuroPrice = calculatePriceInEuro(mostValuableProduct.getPrice(),
+                findRate(mostValuableProduct.getCurrency(), currencies));
+        for (int i = 1; i < products.size(); i++) {
+            Product product = products.get(i);
+            BigDecimal euroPrice = calculatePriceInEuro(product.getPrice(), findRate(product.getCurrency(), currencies));
+            if (euroPrice.compareTo(mostValuableProductEuroPrice) > 0) {
+                mostValuableProduct = product;
+                mostValuableProductEuroPrice = euroPrice;
             }
         }
-        return mostValuable;
+        return mostValuableProduct;
     }
 
-    public static Product getLeastValuableProduct(List<Product> products) {
-        if (products.size() == 0) {
-            throw new EmptyFileException("Brak produktów");
-        }
-        Product leastValuable = products.get(0);
-        for (Product product : products) {
-            if (product.getPrice().compareTo(leastValuable.getPrice()) < 0) {
-                leastValuable = product;
+    public static Product getLeastValuableProduct(List<Product> products, List<Currency> currencies) {
+        Product leastValuableProduct = products.get(0);
+        BigDecimal leastValuableProductEuroPrice = calculatePriceInEuro(leastValuableProduct.getPrice(),
+                findRate(leastValuableProduct.getCurrency(), currencies));
+        for (int i = 1; i < products.size(); i++) {
+            Product product = products.get(i);
+            BigDecimal euroPrice = calculatePriceInEuro(product.getPrice(), findRate(product.getCurrency(), currencies));
+            if (euroPrice.compareTo(leastValuableProductEuroPrice) < 0) {
+                leastValuableProduct = product;
+                leastValuableProductEuroPrice = euroPrice;
             }
         }
-        return leastValuable;
+        return leastValuableProduct;
     }
 
     public static BigDecimal findRate(String currency, List<Currency> currencies) {
@@ -108,26 +110,32 @@ public class PriceController {
     }
 
     public static void showStatistics(String productsFileName, String currenciesFileName) {
-        List<Product> products = readProducts(productsFileName);
-        List<Currency> currencies = readCurrencies(currenciesFileName);
-        Product mostValuableProduct = getMostValuableProduct(products);
-        BigDecimal rateForMostValuableProduct = findRate(mostValuableProduct.getCurrency(), currencies);
-        Product leastValuableProduct = getLeastValuableProduct(products);
-        BigDecimal rateForLeastValuableProduct = findRate(leastValuableProduct.getCurrency(), currencies);
+        try {
+            List<Product> products = readProducts(productsFileName);
+            List<Currency> currencies = readCurrencies(currenciesFileName);
+            Product mostValuableProduct = getMostValuableProduct(products, currencies);
+            BigDecimal rateForMostValuableProduct = findRate(mostValuableProduct.getCurrency(),
+                    currencies);
+            Product leastValuableProduct = getLeastValuableProduct(products, currencies);
+            BigDecimal rateForLeastValuableProduct = findRate(leastValuableProduct.getCurrency(),
+                    currencies);
 
-        System.out.printf("Suma wszystkich produktów: %s EUR%n", getSumInEuro(products, currencies));
-        System.out.printf("Średnia wartość produktu: %s EUR%n",
-                getAveragePriceInEuro(products, currencies));
-        System.out.printf("Najdroższy produkt: %s - %s EUR%n",
-                mostValuableProduct.getName(),
-                calculatePriceInEuro(mostValuableProduct.getPrice(), rateForMostValuableProduct));
-        System.out.printf("Najtańszy produkt: %s - %s EUR%n",
-                leastValuableProduct.getName(),
-                calculatePriceInEuro(leastValuableProduct.getPrice(), rateForLeastValuableProduct));
+            System.out.printf("Suma wszystkich produktów: %s EUR%n", getSumInEuro(products, currencies));
+            System.out.printf("Średnia wartość produktu: %s EUR%n",
+                    getAveragePriceInEuro(products, currencies));
+            System.out.printf("Najdroższy produkt: %s - %s EUR%n",
+                    mostValuableProduct.getName(),
+                    calculatePriceInEuro(mostValuableProduct.getPrice(), rateForMostValuableProduct));
+            System.out.printf("Najtańszy produkt: %s - %s EUR%n",
+                    leastValuableProduct.getName(),
+                    calculatePriceInEuro(leastValuableProduct.getPrice(), rateForLeastValuableProduct));
+        } catch (UncheckedIOException ex) {
+            System.out.println("Wystąpił problem podczas czytania pliku");
+        }
     }
 
     public static BigDecimal calculatePriceInEuro(BigDecimal price, BigDecimal rate) {
-        return price.divide(rate, ROUNDING_SCALE, ROUNDING_MODE);
+        return price.divide(rate, ROUNDING_SCALE, RoundingMode.UP);
     }
 
 }
